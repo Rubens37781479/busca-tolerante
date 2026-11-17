@@ -7,6 +7,7 @@ export interface HighlightTextProps {
   query: string;
   engine: SearchEngine;
   className?: string;
+  formatted?: string;
 }
 
 /**
@@ -17,8 +18,17 @@ export function HighlightText({
   query,
   engine,
   className,
+  formatted,
 }: HighlightTextProps) {
   const segments = useMemo(() => {
+    if (formatted !== undefined) {
+      return formatted.split(/<mark>([\s\S]*?)<\/mark>/g).map((text, index) => ({
+        text,
+        highlighted: index % 2 === 1,
+      }));
+    }
+    if (engine === 'meili') return [{ text, highlighted: false }];
+
     const ranges = findHighlightRanges(text, query, engine);
     if (ranges.length === 0) {
       return [{ text, highlighted: false }];
@@ -49,7 +59,7 @@ export function HighlightText({
     }
 
     return parts;
-  }, [text, query, engine]);
+  }, [text, query, engine, formatted]);
 
   const highlightStyle =
     engine === 'meili' ? 'search-highlight-cyber' : 'search-highlight-mono';

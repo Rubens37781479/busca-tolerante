@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import busca
+from MySQL.routers import busca
+from routers import meili
 
 app = FastAPI( 
     title="API de Busca de Acervo",
@@ -18,6 +19,7 @@ app.add_middleware(
 )
 
 app.include_router(busca.router, prefix="/api")
+app.include_router(meili.router, prefix="/api")
 
 @app.get("/")
 def health_check():

@@ -13,12 +13,3 @@ def busca_mysql(termo: str):
         "termo_buscado": termo, 
         "resultados": []
     }
-
-# Rota para o Vinicius/Rubens implementarem a lógica do Meilisearch
-@router.get("/meili")
-def busca_meili(termo: str):
-    return {
-        "motor": "Meilisearch", 
-        "termo_buscado": termo, 
-        "resultados": []
-    }

@@ -1,4 +1,6 @@
 export type SearchEngine = 'mysql' | 'meili';
+export type SearchFacets = Partial<Record<'genero' | 'ano', Record<string, number>>>;
+export type SearchFilters = { genero: string; ano: string };
 
 export interface Book {
   id: number | string;
@@ -7,6 +9,7 @@ export interface Book {
   genero: string;
   ano: number;
   sinopse: string;
+  _formatted?: Partial<Pick<Book, 'titulo' | 'autor' | 'sinopse'>>;
 }
 
 export interface SearchResponse {
@@ -16,4 +19,5 @@ export interface SearchResponse {
   tempo_ms: number;
   fonte: 'api' | 'local-engine';
   tokens: string[];
+  facetas?: SearchFacets;
 }

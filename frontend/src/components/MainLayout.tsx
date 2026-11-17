@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Volume2, VolumeX } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { searchBooks } from '../services/searchService';
-import type { Book, SearchEngine } from '../types/book';
+import type { Book, SearchEngine, SearchFacets } from '../types/book';
 import { BookCard } from './BookCard';
 import { Background } from './Background';
 import { PixelWave } from './PixelWave';
@@ -28,6 +28,10 @@ export function MainLayout() {
   const [results, setResults] = useState<Book[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
+  const [facets, setFacets] = useState<SearchFacets>({});
+  const [genero, setGenero] = useState('');
+  const [ano, setAno] = useState('');
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   const muted = useMuted();
 
@@ -49,16 +53,27 @@ export function MainLayout() {
 
     const timer = window.setTimeout(async () => {
       const startedAt = performance.now();
-      const response = await searchBooks(trimmed, engine, controller.signal);
-      const remaining = MIN_LOADING_MS - (performance.now() - startedAt);
-      if (remaining > 0) {
-        await new Promise((resolve) => window.setTimeout(resolve, remaining));
-      }
-      if (!controller.signal.aborted) {
+      try {
+        const response = await searchBooks(trimmed, engine, controller.signal, { genero, ano });
+        const remaining = MIN_LOADING_MS - (performance.now() - startedAt);
+        if (engine === 'mysql' && remaining > 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, remaining));
+        }
+        if (controller.signal.aborted) return;
         playSfx(response.resultados.length > 0 ? 'found' : 'empty');
         setResults(response.resultados);
         setLatencyMs(response.tempo_ms);
-        setIsLoading(false);
+        setFacets(response.facetas ?? {});
+        setSearchError(null);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setSearchError(error instanceof TypeError
+          ? 'Não foi possível conectar à API de busca.'
+          : error instanceof Error ? error.message : 'Busca Meilisearch indisponível.');
+        setLatencyMs(null);
+        setResults([]);
+      } finally {
+        if (!controller.signal.aborted) setIsLoading(false);
       }
     }, 200);
 
@@ -66,7 +81,12 @@ export function MainLayout() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [trimmed, engine]);
+  }, [trimmed, engine, genero, ano]);
+
+  const facetControls = [
+    { label: 'Gênero', values: facets.genero, value: genero, setValue: setGenero },
+    { label: 'Ano', values: facets.ano, value: ano, setValue: setAno },
+  ];
 
   return (
     <div className="relative min-h-screen w-full overflow-x-hidden bg-black text-white">
@@ -132,6 +152,33 @@ export function MainLayout() {
           </motion.div>
         </motion.div>
 
+        {hasQuery && engine === 'meili' && (
+          <div className="pointer-events-auto mt-5 flex flex-wrap gap-4">
+            {facetControls.map(({ label, values, value, setValue }) => {
+              const options = Object.keys(values ?? {});
+              if (value && !options.includes(value)) options.push(value);
+              options.sort((a, b) => label === 'Ano' ? Number(b) - Number(a) : a.localeCompare(b, 'pt-BR'));
+              return (
+                <label key={label} className="flex items-center gap-2 text-sm">
+                  {label}
+                  <select
+                    className="rounded-lg border border-steel/20 bg-black px-2 py-1"
+                    value={value}
+                    onChange={(event) => setValue(event.target.value)}
+                  >
+                    <option value="">Todos</option>
+                    {options.map((option) => (
+                      <option key={option} value={option}>
+                        {option} ({values?.[option] ?? 0})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              );
+            })}
+          </div>
+        )}
+
         <AnimatePresence mode="wait" initial={false}>
           {hasQuery && isLoading && (
             <motion.div
@@ -155,49 +202,58 @@ export function MainLayout() {
               className="pointer-events-auto mt-8 w-full max-w-3xl"
               aria-live="polite"
             >
-              <div className="mb-3 flex items-center justify-between px-1 font-mono text-[11px] text-steel/60">
-                <span className="tabular-nums">
-                  {results.length}{' '}
-                  {results.length === 1 ? 'obra encontrada' : 'obras encontradas'}
-                </span>
-                <span className="tracking-wider uppercase">
-                  {engine === 'mysql' ? 'strict_like' : 'fuzzy_typo'}
-                  {latencyMs !== null && ` · ${latencyMs.toFixed(1)} ms`}
-                </span>
-              </div>
-
-              {results.length > 0 ? (
-                <div className="grid grid-cols-1 gap-3">
-                  {results.map((book, index) => (
-                    <BookCard
-                      key={book.id}
-                      book={book}
-                      query={query}
-                      engine={engine}
-                      index={index}
-                    />
-                  ))}
-                </div>
+              {searchError && engine === 'meili' ? (
+                <p role="alert">{searchError}</p>
               ) : (
-                <div className="squircle-card border border-dashed border-steel/10 bg-steel/[0.015] px-6 py-12 text-center">
-                  <p className="font-display text-base font-black tracking-[-0.03em] text-white">
-                    Nenhum registro para &ldquo;{trimmed}&rdquo;
-                  </p>
-                  <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-white/60">
-                    {engine === 'mysql'
-                      ? 'O SQL LIKE exige correspondência exata e falha com erros de digitação ou acentos.'
-                      : 'Nenhum livro atingiu o limiar de similaridade para este termo.'}
-                  </p>
-                  {engine === 'mysql' && (
-                    <button
-                      type="button"
-                      onClick={() => setEngine('meili')}
-                      className="mt-5 rounded-full bg-steel px-4 py-2 text-xs font-medium text-navy transition-colors hover:bg-steel"
-                    >
-                      Testar com Meilisearch
-                    </button>
+                <>
+
+                  <div className="mb-3 flex items-center justify-between px-1 font-mono text-[11px] text-steel/60">
+                    <span className="tabular-nums">
+                      {results.length}{' '}
+                      {engine === 'meili'
+                        ? (results.length === 1 ? 'obra exibida' : 'obras exibidas')
+                        : (results.length === 1 ? 'obra encontrada' : 'obras encontradas')}
+                    </span>
+                    <span className="tracking-wider uppercase">
+                      {engine === 'mysql' ? 'strict_like' : 'fuzzy_typo'}
+                      {latencyMs !== null && ` · ${latencyMs.toFixed(1)} ms`}
+                    </span>
+                  </div>
+
+                  {results.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-3">
+                      {results.map((book, index) => (
+                        <BookCard
+                          key={book.id}
+                          book={book}
+                          query={query}
+                          engine={engine}
+                          index={index}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="squircle-card border border-dashed border-steel/10 bg-steel/[0.015] px-6 py-12 text-center">
+                      <p className="font-display text-base font-black tracking-[-0.03em] text-white">
+                        Nenhum registro para &ldquo;{trimmed}&rdquo;
+                      </p>
+                      <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-white/60">
+                        {engine === 'mysql'
+                          ? 'O SQL LIKE exige correspondência exata e falha com erros de digitação ou acentos.'
+                          : 'Nenhum livro atingiu o limiar de similaridade para este termo.'}
+                      </p>
+                      {engine === 'mysql' && (
+                        <button
+                          type="button"
+                          onClick={() => setEngine('meili')}
+                          className="mt-5 rounded-full bg-steel px-4 py-2 text-xs font-medium text-navy transition-colors hover:bg-steel"
+                        >
+                          Testar com Meilisearch
+                        </button>
+                      )}
+                    </div>
                   )}
-                </div>
+                </>
               )}
             </motion.section>
           )}

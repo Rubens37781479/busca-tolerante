@@ -1,6 +1,5 @@
 import { MOCK_BOOKS } from '../data/mockBooks';
-import type { Book, SearchEngine, SearchResponse } from '../types/book';
-import { isFuzzyTokenMatch, normalizeText } from '../utils/textMatch';
+import type { Book, SearchEngine, SearchFacets, SearchFilters, SearchResponse } from '../types/book';
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL?.replace(/\/$/, '') || 'http://localhost:8000';
@@ -28,70 +27,17 @@ function runLocalMysqlLike(books: Book[], query: string): Book[] {
   });
 }
 
-/**
- * Motor local fiel ao Meilisearch:
- * tokeniza, normaliza diacríticos e pontua por match exato, prefixo e distância de Levenshtein.
- */
-function runLocalMeilisearch(books: Book[], query: string): Book[] {
-  const tokens = query.trim().split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) return books;
-
-  const scored = books
-    .map((book) => {
-      const fields = [
-        { text: book.titulo, weight: 4 },
-        { text: book.autor, weight: 3 },
-        { text: book.genero, weight: 2.5 },
-        { text: String(book.ano), weight: 2 },
-        { text: book.sinopse, weight: 1 },
-      ];
-
-      let score = 0;
-      let matchedTokens = 0;
-
-      for (const token of tokens) {
-        const normToken = normalizeText(token);
-        let bestTokenScore = 0;
-
-        for (const field of fields) {
-          const words = field.text.match(/[\p{L}\p{N}]+/gu) ?? [];
-          for (const word of words) {
-            const normWord = normalizeText(word);
-            if (normWord === normToken) {
-              bestTokenScore = Math.max(bestTokenScore, 10 * field.weight);
-            } else if (normWord.startsWith(normToken)) {
-              bestTokenScore = Math.max(bestTokenScore, 7 * field.weight);
-            } else if (normWord.includes(normToken)) {
-              bestTokenScore = Math.max(bestTokenScore, 5 * field.weight);
-            } else if (isFuzzyTokenMatch(word, token)) {
-              bestTokenScore = Math.max(bestTokenScore, 3 * field.weight);
-            }
-          }
-        }
-
-        if (bestTokenScore > 0) {
-          matchedTokens++;
-          score += bestTokenScore;
-        }
-      }
-
-      return { book, score, matchedTokens };
-    })
-    .filter((entry) => entry.matchedTokens === tokens.length && entry.score > 0)
-    .sort((a, b) => b.score - a.score);
-
-  return scored.map((entry) => entry.book);
-}
-
 interface BackendApiPayload {
   motor?: string;
   termo_buscado?: string;
   resultados?: Array<Partial<Book> & Record<string, unknown>>;
   tempo_ms?: number;
+  facetas?: SearchFacets;
 }
 
 function normalizeApiBook(raw: Partial<Book> & Record<string, unknown>, idx: number): Book {
   return {
+    _formatted: raw._formatted,
     id: raw.id ?? idx + 1,
     titulo: String(raw.titulo ?? raw.title ?? 'Sem título'),
     autor: String(raw.autor ?? raw.author ?? 'Autor desconhecido'),
@@ -101,19 +47,41 @@ function normalizeApiBook(raw: Partial<Book> & Record<string, unknown>, idx: num
   };
 }
 
-/**
- * Consulta o endpoint FastAPI correspondente (`/api/busca/mysql` ou `/api/busca/meili`).
- * Quando o backend está offline ou ainda retorna lista vazia (stub), aplica o motor
- * local equivalente sobre o catálogo para manter a demonstração interativa em tempo real.
- */
 export async function searchBooks(
   query: string,
   engine: SearchEngine,
-  externalSignal?: AbortSignal
+  externalSignal?: AbortSignal,
+  filters?: SearchFilters
 ): Promise<SearchResponse> {
   const startedAt = performance.now();
   const trimmed = query.trim();
   const tokens = trimmed ? trimmed.split(/\s+/).filter(Boolean) : [];
+
+  if (engine === 'meili') {
+    const params = new URLSearchParams({ termo: trimmed });
+    if (filters?.genero) params.set('genero', filters.genero);
+    if (filters?.ano) params.set('ano', filters.ano);
+
+    const response = await fetch(`${API_BASE_URL}/api/busca/meili?${params}`, {
+      signal: externalSignal,
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      const detail = typeof data?.detail === 'string' ? data.detail : 'Busca Meilisearch indisponível.';
+      throw new Error(detail);
+    }
+
+    const data = (await response.json()) as BackendApiPayload;
+    return {
+      motor: engine,
+      termo_buscado: trimmed,
+      resultados: (data.resultados ?? []).map(normalizeApiBook),
+      tempo_ms: data.tempo_ms ?? performance.now() - startedAt,
+      fonte: 'api',
+      facetas: data.facetas,
+      tokens,
+    };
+  }
 
   if (!trimmed) {
     return {
@@ -161,10 +129,7 @@ export async function searchBooks(
   }
 
   const localStart = performance.now();
-  const resultados =
-    engine === 'mysql'
-      ? runLocalMysqlLike(MOCK_BOOKS, trimmed)
-      : runLocalMeilisearch(MOCK_BOOKS, trimmed);
+  const resultados = runLocalMysqlLike(MOCK_BOOKS, trimmed);
 
   return {
     motor: engine,

@@ -41,7 +41,7 @@ export function BookCard({ book, query, engine, index }: BookCardProps) {
           <div className="min-w-0 flex-1 space-y-1">
             <div className="flex items-center gap-2">
               <h2 className="font-display text-lg font-black tracking-[-0.04em] text-white sm:text-xl">
-                <HighlightText text={book.titulo} query={query} engine={engine} />
+                <HighlightText text={book.titulo} formatted={book._formatted?.titulo} query={query} engine={engine} />
               </h2>
               <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-steel/50 opacity-0 transition-all duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-white/75 group-hover:opacity-100" />
             </div>
@@ -50,6 +50,7 @@ export function BookCard({ book, query, engine, index }: BookCardProps) {
               <span className="text-steel/60">por </span>
               <HighlightText
                 text={book.autor}
+                formatted={book._formatted?.autor}
                 query={query}
                 engine={engine}
                 className="font-medium text-white/90"
@@ -73,7 +74,7 @@ export function BookCard({ book, query, engine, index }: BookCardProps) {
 
         {/* Sinopse */}
         <p className="line-clamp-3 text-sm leading-relaxed text-white/60 transition-colors duration-200 group-hover:text-white/75">
-          <HighlightText text={book.sinopse} query={query} engine={engine} />
+          <HighlightText text={book.sinopse} formatted={book._formatted?.sinopse} query={query} engine={engine} />
         </p>
       </div>
     </motion.article>
